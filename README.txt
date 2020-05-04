@@ -66,7 +66,7 @@ outreg2 takes an astonishingly long time to run.
 		
 per the paper's own instructions, I estimated the cohort trend for all income related variables in 1980 using a cubic function. However, it seems as though Almond used a squared trend estimation. 
 	     1980 income variables
-	  Variable   |  Thabet  | Almond
+	  Variable   |  Thab    | Almond
 	  ------------------------------
 Mean	  totinc_adj |-600.096  |-1,065
 SD		     |(174.147) |[191]
