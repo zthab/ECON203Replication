@@ -1,0 +1,981 @@
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/zahrathabet/Desktop/replication/replication.log
+  log type:  text
+ opened on:   4 May 2020, 12:43:47
+
+. use census.dta, clear;
+
+. /*
+> Samples selected:
+>         1960 1%
+> 
+>         1970 Form 1 State 1%
+> 
+>         1970 Form 1 Metro 1%
+> 
+>         1970 Form 1 Neighborhood 1%
+>                 
+>         1980 5%
+>                 
+>         In each of these samples, age and birthplace were restricted to these 
+>         specifications:
+>         
+>         AGE: 038-068
+>                 Note: contains the desired 1911-1924 birth cohort for all census years.
+>                 
+>         BPL: 001-120
+>                 Note: limits selection of birthplace to the U.S.        
+>                 
+> More information available in codebook.cbk file
+> */
+> 
+> 
+> 
+> capture program drop rep_clean_vars;
+
+. program define rep_clean_vars;
+  1. /*
+> cleans variables to be used in rest of analysis.
+> */
+> 
+> 
+> 
+> *generating age-related statistics;
+. qui gen         yob     = year - age;
+  2.  la var                 yob     "year of birth";
+  3. qui replace yob         = year - age - 1 if inlist(birthqtr, 2, 3, 4);
+  4. /*
+>         "                       year of birth = :
+> 
+>         census year-age-1       if born April to December
+>         census year-age         if born January to March        
+>         
+>         "(Almond 683)
+> */
+>         
+> qui keep if ((yob <= 1924) & (yob >= 1911));
+  5.  *keeps observations that were born 1911-1924;
+.  qui gen i1919  = (yob == 1919);
+  6. la var  i1919   "born in 1919";
+  7. *generating education-related statistics;
+.  qui replace higrade = 21 if ((higrade == 22) | (higrade == 23));
+  8.  *high school graduation indicator. codes >=7 years of post-secondary 
+> *education (higrade = 22-23) as >=6 years of P-S education (higrade = 21) 
+> *because the data for 7-8 years of p-s education is unavailable in the 1960 and
+> *1970 censuses;
+. qui gen         yrsofeduc       = . ;
+  9. la var          yrsofeduc       "years of education";
+ 10. qui replace yrsofeduc   = 0 if inlist(higrade, 0, 1, 2, 3);
+ 11. *codes pre 1st-grade education as 0 years of education;
+.         qui replace yrsofeduc   = higrade - 3 if ((higrade >= 4) & (higrade <= 99));
+ 12. *transforms yrsofeduc so that 1st grade is coded as one year of education;
+. *high school graduate stats;
+. qui gen         hsgrad          = (yrsofeduc >= 12);
+ 13. la var          hsgrad          "graduated high school";
+ 14. qui replace hsgrad              = . if (yrsofeduc == .);
+ 15. *when years of education is not available, codes hsgrad as unavailable rather
+> *than as 0;
+. *generating wage and income statistics;
+. *imports CPI data to inflate USD to 2005 dollar levels;
+. preserve;
+ 16.         *keeps census data set;
+.         qui import delimited using CPI.csv, clear;
+ 17.         /*
+>         Consumer Price Index: Total All Items for the United States
+>                 Units: Growth Rate Previous Period, Not Seasonally Adjusted
+>                 Frequency: Annual 
+>                 
+>         Source:
+>                 Organization for Economic Co-operation and Development, Consumer Price 
+>                 Index: Total All Items for the United States [CPALTT01USA657N], 
+>                 retrieved from FRED, Federal Reserve Bank of St. Louis; 
+>                 https://fred.stlouisfed.org/series/CPALTT01USA657N, April 30, 2020.
+>         */
+> 
+>         qui su          cpi             if (year == 2005);
+ 18.         qui gen         adj_factor      = r(mean) / cpi;
+ 19.         *adj factor that can be multiplied by dollar amt to give it in 2005 terms;
+.                 la var          adj_factor "2005 inflation factor";
+ 20.         qui save        cpi.dta,        replace;
+ 21. restore;
+ 22. sort year;
+ 23.         *sorts the census data by year, makes it marginally faster to merge;
+. qui merge m:1 year using cpi.dta;
+ 24.         *adds inflation factor to census data;
+. qui keep if _merge == 3;
+ 25. *keeps data that is matched, and gets rid of cpi data that isn't from 1960;
+. *1970, 1980;
+. qui gen         incwage_adj     = incwage * adj_factor;
+ 26.         la var          incwage_adj     "wage and salary income (2005 dollars)";
+ 27. qui replace incwage_adj         = . if (incwage == 0);
+ 28. *codes wage income as null if it is 0, explained in readme;
+. qui gen         iemp                    = (incwage_adj != .);
+ 29.         *there are no negative values of wage in this dataset, so this indicates if the
+> *observation receives a wage or not (proxy for employment);
+. la var  iemp                    "receives wages";
+ 30.  qui gen inctot_adj             = inctot * adj_factor;
+ 31. la var  inctot_adj              "total personal income (2005 dollars)";
+ 32. qui gen nmedinc_adj     = nmedinc * adj_factor * 1000;
+ 33. *originally in thousands of dollars, multiplying by 1000 gets rid of adjustment;
+. la var  nmedinc_adj     "median family income (2005 dollars)";
+ 34. qui gen incwelfr_adj    = incwelfr * adj_factor;
+ 35.         la var  incwelfr_adj    "welfare (public assistance) income (2005 dollars)";
+ 36. qui gen irecwelf                = (incwelfr_adj != 0 & incwelfr_adj !=.);
+ 37. la var  irecwelf                "receives welfare (public assistance) income";
+ 38. qui gen incss_adj               = incss * adj_factor;
+ 39. la var  incss_adj               "social security income (2005 dollars)";
+ 40. qui gen irecss                  = (incss_adj != 0 & incss_adj != .);
+ 41. la var  irecss                  "receives social security income";
+ 42. qui gen ipoverty                = (poverty < 150);
+ 43.  * `poor' is defined by Almond as "below 150% of the poverty level" (688);
+. la var  ipoverty                "below 150% of the poverty level";
+ 44. *generating disability statistics;
+. qui gen idislimwrk              = (disabwrk == 2);
+ 45.         la var  idislimwrk              "disability limits but does not prevent work";
+ 46. qui gen idisprevwrk     = (disabwrk == 3);
+ 47. la var  idisprevwrk     "disability prevents work";
+ 48. qui gen idisaffwrk              = (idislimwrk | idisprevwrk);
+ 49. la var  idisaffwrk              "disability limits or prevents work";
+ 50. gen     disabduradj     = 0;
+ 51.  la var         disabduradj     "duration of  work disability in years";
+ 52. qui replace disabduradj = 0.25  if (disabdur == 1);
+ 53. qui replace disabduradj = 0.75  if (disabdur == 2);
+ 54. qui replace disabduradj = 2     if (disabdur == 3);
+ 55. qui replace disabduradj = 4     if (disabdur == 4);
+ 56. qui replace disabduradj = 7.5   if (disabdur == 5);
+ 57. qui replace disabduradj = 15    if (disabdur == 6);
+ 58. qui replace idislimwrk  = .     if (disabwrk == .);
+ 59. qui replace idisprevwrk = .     if (disabwrk == .);
+ 60. qui replace idisaffwrk  = .     if (disabwrk == .);
+ 61. qui replace disabduradj = .     if ((disabwrk == .) | (year == 1980));
+ 62.  *codes disability variables as null in census years when it does not exist;
+. end;
+
+. rep_clean_vars;
+
+. capture program drop table_1;
+
+. program define table_1;
+  1. /*
+> Table 1: male outcome means replication;
+> */ 
+> 
+> putexcel set analysis.xlsx, sheet(table 1) modify;
+  2. foreach y in 1 0{;
+  3. *loops through born in 1919 status;
+.         tabstat age hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty 
+>                 nmedinc_adj sei idislimwrk idisprevwrk disabduradj incss_adj irecss 
+>                 incwelfr_adj irecwelf 
+>                 if (i1919 == `y') & (sex == 1) & (yob >= 1918) & (yob <= 1920), 
+>                 by(year) stat(mean sd co) nototal save;
+  4.         *summary statistics for 1919 and surrounding cohort of males born 1918-1920;
+.                         mat table1_`y'                  = [r(Stat1)\r(Stat2)\r(Stat3)];
+  5.         *matrix of summary statistics;
+.                 if `y'{;
+  6.  *if cohort of men born in 1919;
+.                                 qui putexcel A1         = "1919 Male Cohort";
+  7.                                 qui putexcel A3         = 1960;
+  8.                                 qui putexcel A6         = 1970;
+  9.                                 qui putexcel A9         = 1980;
+ 10.                                 qui putexcel B2         = matrix(table1_`y'), names nformat(number_d2);
+ 11.                         };
+ 12.                 else{;
+ 13.  *if cohort of men born 1918 and 1920;
+.                         qui putexcel A12        = "Surrounding Male Cohort";
+ 14.                                 qui putexcel A14        = 1960;
+ 15.                                 qui putexcel A17        = 1970;
+ 16.                                 qui putexcel A20        = 1980;
+ 17.                 qui putexcel B13        = matrix(table1_`y'), names nformat(number_d2);
+ 18.         };
+ 19.         *transfers summary statistics to excel spreadsheet titled "analysis";
+. };
+ 20. end;
+
+.  table_1;
+
+Summary statistics: mean, sd, N
+  by categories of: year (census year)
+
+year |       age    hsgrad  yrsofe~c  inctot~j  incwag~j      iemp  ipoverty  nmedin~j       sei  idisli~k  idispr~k  disabd~j  incss_~j    irecss  incwel~j
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1960 |  40.25251  .4816552  10.51145  38296.65   37206.7  .8218851  .2956322         .  33.88395         .         .         .         .         0         .
+     |  .4344697  .4996863  3.584439  27028.58  21637.74  .3826271  .4563474         .  24.42246         .         .         .         .         0         .
+     |     10875     10875     10875     10875      8938     10875     10875         0     10875         0         0         0         0     10875         0
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1970 |  50.24293  .5071961  10.71726  48956.76  47830.69  .8326266  .1365652  50548.67  36.72057  .1136276  .0546453  1.416313  214.1423  .0309047  99.37127
+     |  .4288615  .4999562  3.548364  38773.54  32567.29  .3733149  .3433932  17464.41  24.32328  .3173635  .2272903  3.959074  1425.728  .1730622  979.5824
+     |     31128     31128     31128     31128     25918     31128     31128     10276     31128     31128     31128     31128     31128     31128     31128
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1980 |  60.24892  .5469685  10.96552  41363.11   42821.9  .6751629  .1448482         .  34.28428  .0993705  .1657427         .  1145.282  .1286582  178.7267
+     |   .432394  .4977946  3.618055  33467.57  29577.43  .4683191  .3519516         .  26.29609  .2991621  .3718536         .  3301.133  .3348249  1275.595
+     |     45275     45275     45275     45275     30568     45275     45275         0     45275     45275     45275         0     45275     45275     45275
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+year |  irecwelf
+-----+----------
+1960 |         0
+     |         0
+     |     10875
+-----+----------
+1970 |  .0176369
+     |  .1316296
+     |     31128
+-----+----------
+1980 |  .0315627
+     |  .1748346
+     |     45275
+----------------
+
+Summary statistics: mean, sd, N
+  by categories of: year (census year)
+
+year |       age    hsgrad  yrsofe~c  inctot~j  incwag~j      iemp  ipoverty  nmedin~j       sei  idisli~k  idispr~k  disabd~j  incss_~j    irecss  incwel~j
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1960 |  40.25053  .5031914  10.65955  38905.78   37935.9   .822804  .2890452         .  34.43085         .         .         .         .         0         .
+     |  1.082976  .5000007  3.519745  27532.86  22823.02  .3818427  .4533288         .  24.69711         .         .         .         .         0         .
+     |     23031     23031     23031     23031     18950     23031     23031         0     23031         0         0         0         0     23031         0
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1970 |  50.23852  .5270438  10.87586  49947.06  48623.54  .8355863  .1291037  51412.27  37.49638  .1088974  .0521878  1.341627  224.5883  .0309767  87.38401
+     |  1.081294   .499272  3.520647  39056.94  32663.93  .3706534  .3353173  17816.72  24.46271  .3115128  .2224074  3.867406   1500.63   .173256   884.267
+     |     63693     63693     63693     63693     53221     63693     63693     21296     63693     63693     63693     63693     63693     63693     63693
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1980 |  60.21831  .5613386  11.08755  42155.27  43316.17  .6778429  .1413948         .   34.7783  .0976405  .1580652         .  1105.223  .1247245  166.2604
+     |  1.083714  .4962259  3.597318  34317.29  30174.75  .4673052  .3484302         .  26.38722  .2968294   .364804         .  3245.259   .330408  1218.399
+     |     95739     95739     95739     95739     64896     95739     95739         0     95739     95739     95739         0     95739     95739     95739
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+year |  irecwelf
+-----+----------
+1960 |         0
+     |         0
+     |     23031
+-----+----------
+1970 |  .0164225
+     |  .1270948
+     |     63693
+-----+----------
+1980 |   .029852
+     |  .1701798
+     |     95739
+----------------
+
+. capture program drop figure_2;
+
+. program define figure_2;
+  1. *Figure 2: percent of cohort disabled by birth quarter replication;
+.  preserve;
+  2. *observation limitation for regression;
+. qui keep if ((yob <= 1920 & yob >= 1918) | (yob == 1917 & birthqtr == 4 )) & 
+>         (sex == 1) & (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .);
+  3. *keeps men born 1918-1920 and men born in the last quarter of 1917. All
+> *observations with allocated ages are removed from the following analysis;
+. *program variable creation;
+. qui egen time   = group(yob birthqtr);
+  4. la var   time   "birth quarter, year of birth cohorts";
+  5. qui bys  time:  gen f_time = (_n == 1);
+  6. la var   f_time "first observation in each birth quarter, year of birth cohort";
+  7. qui su   time;
+  8. local max_time  = r(max);
+  9. qui gen  dis80  = .;
+ 10. la var   dis80  "proportion of birth qtr, yob cohort disabled in 1980 census";
+ 11. *regression and coefficient assignment;
+. qui reg idisprevwrk ibn.time if year == 1980, noconstant;
+ 12.  *coefficients are mean disability rates for each birth quarter cohort in 1980 
+> *census;
+. forv i = 1 / `max_time' {;
+ 13. *loops through each cohort;
+.         qui replace dis80 = _b[`i'.time] if time == `i';
+ 14.         *locates disability rate coefficients for each cohort from
+>         *regression, assigns value to every observation in the same cohort;
+.         };
+ 15. *graphing of regression coefficients;
+. set graphics off;
+ 16.         *disables graphics from popping up;
+. scatter dis80 time if f_time == 1, 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Percent of Cohort Disabled") 
+>         xtitle("Quarter of Birth") 
+>         xlabel( 1 " " 2 "1918 Q1" 3 " " 4 "1918 Q3" 5 " " 6 "1919 Q1" 7 " " 8 
+>                         "1919 Q3" 9 " " 10 "1920 Q1" 11 " " 12 "1920 Q3" 13 " ") 
+>         xline(6, lcolor(black) lwidth(thin) lpattern(dash))
+>         note(Fig. 2. — 1980 male disability rates by quarter of birth: prevented 
+>                 from work by a physical disability.);
+ 17.                                         *scatter plot of percent disabled by quarter of birth and year of birth;
+. qui gr save     Figure2, replace;
+ 18.                 *saves scatter plot as a gph;
+. qui gr export   Figure2.pdf, replace;
+ 19.         *saves scatter plot as a pdf;
+. restore;
+ 20. end;
+
+. figure_2;
+
+. capture program drop table_2;
+
+. program define table_2;
+  1. /*
+> Table 2: Departure of 1919 Male Birth Cohort Outcomes from 1912–22 Trend 
+> replication.
+> */
+>                 
+> preserve;
+  2. *observation limitation implementation for summary statistics;
+.  qui keep if sex == 1 & (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .) & 
+>         yob >= 1912 & yob <= 1922;
+  3. *keeps male observations with non allocated ages born 1912-1922;
+. *program variable creation;
+. *terms for regression to be performed that involve income;
+. qui gen yob_square              = c.yob^2;
+  4. la var  yob_square              "year of birth squared";
+  5.                                 qui gen yob_cube                = c.yob^3;
+  6.                                 la var  yob_cube                "year of birth cubed";
+  7. *regression and coefficient output;
+. qui reg hsgrad i1919 c.yob##c.yob if year == 1960 & sex == 1, 
+>         depname("hsgrad 1960") nocons vce(robust);
+  8. *first result from regression to export to xml titled table2 (notice, the
+> *dependent variable is the first variable in the following foreach loop);
+. qui outreg2 using table2, se replace excel bdec(3) noaster keep(i1919) 
+>         stat(coef se pval);
+  9.   *export of first result;
+. foreach y in hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty nmedinc_adj 
+>         sei idislimwrk idisprevwrk disabduradj incss_adj irecss incwelfr_adj 
+>         irecwelf {;
+ 10.                 foreach t in 1960 1970 1980{;
+ 11.                                         qui cou if year ==`t' & `y' != .;
+ 12.                 *counts number of variables that arent null in the census year;
+.                 if (!("`y'" == "hsgrad" & `t' == 1960)) & (r(N) != 0) {;
+ 13.                 *skipping what is already done outside of loop;
+.                 *if there are any non null values, continues to perform regression
+>                 *will output error if regression performed on variable with only nulls;
+.                                         if `t' == 1980 & (`y' == inctot_adj | `y' == incwage_adj | `y' == 
+>                                 iemp | `y' == incss_adj | `y' == irecss | `y' == incwelfr_adj | 
+>                                 `y' == irecwelf) {;
+ 14.                         /*
+>                         "For 1980 income measures only, the cohort trend is estimated as a
+>                         cubic function to attempt to account for retirement at age 62" (696)
+>                         */
+>                                 
+>                                 qui reg `y' i1919 c.yob yob_square yob_cube if year == `t' & 
+>                                         sex == 1, depname("`y' `t'") vce(robust);
+ 15.                                 * use of robust se: "Robust standard errors are in brackets" 
+>                                 *(688). coefficient of i1919 measures departure from trend of
+>                                 *variable `y' for men born in 1919;
+.                                                                 };
+ 16.                                                 else {;
+ 17.                                                         qui reg `y' i1919 c.yob##c.yob if year == `t' & sex == 1, 
+>                                         depname("`y' `t'") vce(robust);
+ 18.                                                                         /*
+>                                 Model specifications outlined on p.687. Coefficient of i1919 
+>                                 measures departure from trend of variable `y' for men born in 
+>                                 1919. Variable name changed so as to easily identify census year
+>                                 of variable in output.
+>                                 */
+>                         
+>                         };
+ 19.                 qui outreg2 using table2, se append excel bdec(3) keep(i1919) 
+>                         stat(coef se pval) nocons noaster;
+ 20.                 *outputs i1919 coefficient to xml named table 2;
+.                                 };
+ 21.                                 };
+ 22.         };
+ 23. restore;
+ 24. end;
+
+. table_2;
+ :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  : 
+. capture program drop table_3;
+
+. program define table_3;
+  1. /*
+> Table 3: 1912–22 Census Outcomes among Women (Census Years 1960, 1970, and 1980)
+> Replication
+> */
+> 
+> preserve;
+  2. *observation limitation implementation for summary statistics;
+.  keep if yob >= 1912 & yob <= 1922;
+  3.         *keeps observations born 1912-1922;
+. putexcel set analysis.xlsx, sheet(table 3) modify;
+  4. *summary statistics and summary statistics outputs;
+.  tabstat hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty nmedinc_adj sei 
+>         idislimwrk idisprevwrk disabduradj incss_adj irecss incwelfr_adj irecwelf 
+>         if i1919 == 0 & sex == 2, by (year) stat(mean sd co) nototal save;
+  5.         *summary statistics for women not born in 1919;
+.                 mat table3_0 = [r(Stat1)\r(Stat2)\r(Stat3)];
+  6.         putexcel A1  = "Female Sample Mean";
+  7.                 putexcel A3  = 1960;
+  8.                 putexcel A6  = 1970;
+  9.                 putexcel A9      = 1980;
+ 10.                 putexcel B2  = matrix(table3_0), names nformat(number_d2);
+ 11. *puts summary statistics in analysis.xlsx in a sheet labeled table 4;
+.  *observation limitation for departure from mean regression;
+.  keep if ((qage == 0) | (qage == .)) & ((qage2 == 0) | (qage2 == .));
+ 12. *keeps observations with non-allocated ages;
+. *departure from mean regression variable creation;
+.  *terms for regression to be performed that involve income;
+.  qui gen yob_square             = c.yob^2;
+ 13. la var  yob_square              "year of birth squared";
+ 14.                                 qui gen yob_cube                = c.yob^3;
+ 15.                                 la var  yob_cube                "year of birth cubed";
+ 16. *regression and coefficient output;
+. qui reg hsgrad i1919 c.yob##c.yob if year == 1960 & sex == 2, vce(robust) 
+>         depname("hsgrad 1960");
+ 17. *first result from regression to start exporting to xml titled table2;
+. qui outreg2 using table3, se replace excel bdec(3) keep(i1919) nocons noaster
+>         stat(coef se pval);
+ 18.  foreach y in hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty nmedinc_adj 
+>         sei idislimwrk idisprevwrk disabduradj incss_adj irecss incwelfr_adj 
+>         irecwelf {;
+ 19.                 foreach t in 1960 1970 1980 {;
+ 20.                         qui cou if year == `t' & `y' != .;
+ 21.                 *counts number of variables that arent null in the census year;
+.                 if (!("`y'" == "hsgrad" & `t' == 1960)) & r(N){;
+ 22.                 *skipping what is already done outside of loop;
+.                 *if there are any non null values, continues to perform regression
+>                 *will output error if regression performed on variable with only nulls;
+.                                                 if `t' == 1980 & ("`y'" == "inctot_adj" | "`y'" == "incwage_adj" | 
+>                                 "`y'" == "iemp" | "`y'" == "incss_adj" | "`y'" == "irecss" | 
+>                                 "`y'" == "incwelfr_adj" | "`y'" == "irecwelf") {;
+ 23.                         /*
+>                         "For 1980 income measures only, the cohort trend is estimated as a
+>                         cubic function to attempt to account for retirement at age 62" (696)
+>                         */
+>                                 
+>                                 qui reg `y' i1919 c.yob yob_square yob_cube if year == `t' & 
+>                                         sex == 2, depname("`y' `t'") vce(robust);
+ 24.                                 *use of robust se: "Robust standard errors are in brackets" 
+>                                 *(688). coefficient of i1919 measures departure from trend of
+>                                 *variable `y' for women born in 1919.;
+.                                         };
+ 25.                                                 else {;
+ 26.                                                                                 qui reg `y' i1919 c.yob##c.yob if year == `t' & sex == 2, 
+>                                         vce(robust) depname("`y' `t'");
+ 27.                                 /*
+>                                 Model specifications outlined on p.687. Coefficient of i1919 
+>                                 measures departure from trend of variable `y' for those born in 
+>                                 1919. Name is changed in output to easily identify census year 
+>                                 of variable in output.
+>                                 */
+>                         
+>                         };
+ 28.                                         qui outreg2 using table3, se append excel bdec(3) keep(i1919) 
+>                                 stat(coef se pval) nocons noaster;
+ 29.                                 *outputs i1919 coefficient to xml file titled table3;
+.                                         };
+ 30.                         };
+ 31.         };
+ 32. restore;
+ 33. end;
+
+. table_3;
+(552,066 observations deleted)
+
+Summary statistics: mean, sd, N
+  by categories of: year (census year)
+
+year |    hsgrad  yrsofe~c  inctot~j  incwag~j      iemp  ipoverty  nmedin~j       sei  idisli~k  idispr~k  disabd~j  incss_~j    irecss  incwel~j  irecwelf
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1960 |  .4980914  10.49428  8277.167  15552.25  .4508309  .2879756         .  21.98521         .         .         .         .         0         .         0
+     |  .4999985  3.076258  12591.76  11869.61  .4975787  .4528217         .  24.16747         .         .         .         .         0         .         0
+     |    114218    114218    114218     51493    114218    114218         0    114218         0         0         0         0    114218         0    114218
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1970 |   .516836  10.66453  13287.03  21011.04  .5271071  .1767097  50204.64  25.45908  .0707942  .0853577  1.242049  265.5834  .0459967  147.4205  .0263609
+     |  .4997172  3.079083  18128.23  15987.64  .4992654  .3814234  17175.62   25.0614  .2564812  .2794136  3.661356  1525.601  .2094782  1121.276  .1602064
+     |    324306    324306    324306    170944    324306    324306    108526    324306    324306    324306    324306    324306    324306    324306    324306
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1980 |   .538588  10.79058  13203.12  18884.72  .3499868  .2269629         .  19.55613  .0549583  .1868575         .  2590.871  .4300977  276.1083  .0619567
+     |  .4985092  3.156816  16645.65  16051.65  .4769659  .4188688         .  25.04761  .2278991  .3897975         .  3598.896    .49509  1368.624  .2410771
+     |    510405    510405    510405    178635    510405    510405         0    510405    510405    510405         0    510405    510405    510405    510405
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+(57,430 observations deleted)
+ :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  : 
+. capture program drop table_4;
+
+. program define table_4;
+  1. *Table 4: 1912–22 Census Outcomes among Nonwhites (Census Years 1960, 1970, and;
+. *1980) Replication;
+. preserve;
+  2. *observation limitation implementation for summary statistics and regression;
+.  keep if (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .) & yob >= 1912 & 
+>         yob <= 1922;
+  3. *keeps observations with non-allocated ages born 1912-1922;
+. *summary statistics and summary statistics outputs;
+. putexcel set analysis.xlsx, sheet(table 4) modify;
+  4. tabstat hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty nmedinc_adj sei 
+>         idislimwrk idisprevwrk disabduradj incss_adj irecss incwelfr_adj irecwelf 
+>         if i1919 == 0 & race != 1, by (year) stat(mean sd co) nototal save;
+  5. *summary statistics for nonwhite observations not born in 1919;
+.                 mat table4_0 = [r(Stat1)\r(Stat2)\r(Stat3)];
+  6.         putexcel A1  = "Nonwhite Sample Mean";
+  7.                 putexcel A3  = 1960;
+  8.                 putexcel A6  = 1970;
+  9.                 putexcel A9      = 1980;
+ 10.                 putexcel B2  = matrix(table4_0), names nformat(number_d2);
+ 11. *puts summary statistics in analysis.xlsx in a sheet labeled table 4;
+. *regression variable creation;
+. *terms for regression to be performed that involve income;
+.  qui gen yob_square             = c.yob^2;
+ 12. la var  yob_square              "year of birth squared";
+ 13.                                 qui gen yob_cube                = c.yob^3;
+ 14.                                 la var  yob_cube                "year of birth cubed";
+ 15. *regression and coefficient output;
+. qui reg hsgrad i1919 c.yob##c.yob if year == 1960 & race != 1, vce(robust) 
+>         depname("hsgrad 1960");
+ 16. *first result from regression to start exporting to xml titled table2;
+. qui outreg2 using table4, se replace excel bdec(3) noaster nocons keep(i1919) 
+>         stat(coef se pval);
+ 17.  foreach y in hsgrad yrsofeduc inctot_adj incwage_adj iemp ipoverty nmedinc_adj
+>         sei idislimwrk idisprevwrk disabduradj incss_adj irecss incwelfr_adj
+>         irecwelf {;
+ 18.                 foreach t in 1960 1970 1980 {;
+ 19.                         qui cou if year == `t' & `y' != .;
+ 20.                 *counts number of variables that arent null in the census year;
+.                                 if ((!("`y'" == "hsgrad" & `t' == 1960)) & r(N)){;
+ 21.                 *skipping what is already done outside of loop;
+.                 *if there are any non null values, continues to perform regression
+>                 *will output error if regression performed on variable with only nulls;
+.                                                 if `t' == 1980 & ("`y'" == "inctot_adj" | "`y'" == "incwage_adj" | 
+>                                 "`y'" == "iemp" | "`y'" == "incss_adj" | "`y'" == "irecss" | 
+>                                 "`y'" == "incwelfr_adj" | "`y'" == "irecwelf") {;
+ 22.                         /*
+>                         "For 1980 income measures only, the cohort trend is estimated as a
+>                         cubic function to attempt to account for retirement at age 62" (696)
+>                         */
+>                                 
+>                                 qui reg `y' i1919 c.yob yob_square yob_cube if year == `t' & 
+>                                         race != 1, depname("`y' `t'") vce(robust);
+ 23.                                 *robust se: "Robust standard errors are in brackets"(688);
+.                                         };
+ 24.                                                 else {;
+ 25.                                                         qui reg `y' i1919 c.yob##c.yob if year == `t' & race != 1, 
+>                                         vce(robust) depname("`y' `t'");
+ 26.                                 *Model specifications outlined on p.687;
+.                                                 };
+ 27.                                         qui outreg2 using table4, se append excel bdec(3) keep(i1919) 
+>                                 stat(coef se pval) nocons noaster;
+ 28.                                 *outputs i1919 coefficient to xml file titled table4;
+.                                                         };
+ 29.                         };
+ 30.         };
+ 31. restore;
+ 32. end;
+
+. table_4;
+(609,496 observations deleted)
+
+Summary statistics: mean, sd, N
+  by categories of: year (census year)
+
+year |    hsgrad  yrsofe~c  inctot~j  incwag~j      iemp  ipoverty  nmedin~j       sei  idisli~k  idispr~k  disabd~j  incss_~j    irecss  incwel~j  irecwelf
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1960 |  .2241626  8.057878  13451.28  16805.76  .6973471  .5949995         .  15.69606         .         .         .         .         0         .         0
+     |  .4170396  3.764953  14619.51  13186.88  .4594172  .4909038         .  17.21065         .         .         .         .         0         .         0
+     |     20958     20958     20958     14615     20958     20958         0     20958         0         0         0         0     20958         0     20958
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1970 |   .243599  8.442518  18445.84   23115.3  .6890476  .3966797  38583.48  18.28528  .1053121  .1292842  1.807565  356.1234  .0611235   423.352  .0744608
+     |  .4292572  3.720962  19769.19  17975.21  .4628874  .4892128   13979.3  19.17202  .3069579  .3355171  4.266642  1789.627  .2395588  1914.603  .2625216
+     |     56983     56983     56983     39264     56983     56983     19080     56983     56983     56983     56983     56983     56983     56983     56983
+-----+------------------------------------------------------------------------------------------------------------------------------------------------------
+1980 |  .2803149   8.60102   15751.5  22548.67  .4303445  .4188123         .  15.25999  .0819683  .2780941         .  2483.549  .3858754  698.5606  .1480069
+     |  .4491555  3.949832  18307.04  19762.27  .4951271  .4933672         .  20.52604  .2743179  .4480625         .  3862.684  .4868041   2193.46  .3551087
+     |     90962     90962     90962     39145     90962     90962         0     90962     90962     90962         0     90962     90962     90962     90962
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+file analysis.xlsx saved
+ :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  :  : 
+. capture program drop figure_3;
+
+. program define figure_3;
+  1. /*
+> Figure 3: 1960 average years of schooling: men and women born in the United 
+> States Replication
+> */
+> 
+> preserve;
+  2. *observation limitation for regression;
+. qui keep if (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .) & yob >= 1912 
+>         & yob <= 1922;
+  3. *keeps observations where age is not allocated;
+. *variable creation for regression;
+. qui egen time3          = group(yob);
+  4. la var  time3           "year of birth cohorts";
+  5. qui bys time3:          gen f_time3 = (_n == 1);
+  6. la var  f_time3         "first observation in each time3 cohort";
+  7. qui su  time3;
+  8. local   max_time3       = r(max);
+  9.         *counts number of years of birth;
+. qui gen avgeduc         = .;
+ 10. la var  avgeduc         "average years of education for each time3 cohort";
+ 11. *regression and coefficient output;
+. qui reg yrsofeduc ibn.time3 if year == 1960, noconstant;
+ 12.  *coefficients are mean years of education for each yob cohort in 1960 census;
+. forv i = 1 / `max_time3' {;
+ 13. *loops through each cohort;
+.         qui replace avgeduc = _b[`i'.time3] if time3 == `i';
+ 14.         *locates mean years of education coefficient for each cohort from;
+.         *regression, assigns this value to every observation in the same cohort;
+.         };
+ 15. *graphing of regression coefficients;
+. set graphics off;
+ 16.         *disables graphics from popping up;
+. scatter avgeduc time3 if f_time3 == 1, 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Years of Schooling") 
+>         xtitle("Year of Birth") 
+>         xlabel( 1 "1912" 2 " " 3 "1914" 4 " " 5 "1916" 6 " " 7 "1918" 8 " " 9 
+>                 "1920" 10 " " 11 "1922") 
+>         xline(8, lcolor(black) lwidth(thin) lpattern(dash)) 
+>         note(Fig. 3. — 1960 average years of schooling: men and women born in the 
+>                 United States);
+ 17.                                         *scatter plot of years of education by year of birth in 1960 census;
+. qui gr  save Figure3, replace;
+ 18.                         *saves scatter plot as a gph;
+. qui gr  export Figure3.pdf, replace;
+ 19.         *saves scatter plot as a pdf;
+.         restore;
+ 20. end;
+
+. figure_3;
+
+. capture program drop figure_4;
+
+. program define figure_4;
+  1. *Figure 4: 1970 high school graduation: by year of birth replication;
+. preserve;
+  2. *observation limitations for regression;
+. qui keep if (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .) & yob >= 1912 & 
+>         yob <= 1922;
+  3. *keeps observations if their age is not allocated and they are born 1912-1922;
+. *variable creation for regression;
+. qui egen time4          = group(yob);
+  4. la var   time4          "year of birth cohorts";
+  5. qui egen time41         = group(yob sex);
+  6. la var   time41         "year of birth by sex cohorts";
+  7. qui bys  time41:        gen f_time4 = (_n == 1);
+  8.         la var   f_time4        "first observation in time41 cohorts";
+  9. qui su   time4;
+ 10. local    max_time4      = r(max);
+ 11.         *counts number of years of birth;
+. qui gen  pergrad        = .;
+ 12. la var   pergrad        "Percent of Men Graduating";
+ 13. qui gen  pergradb       = .;
+ 14. la var   pergradb       "Percent of Women Graduating";
+ 15. *regression and coefficient output;
+. qui replace hsgrad      = hsgrad * 100;
+ 16.         *puts hsgrad in percent terms;
+. qui reg hsgrad ibn.time4 if year == 1970 & sex == 1, noconstant;
+ 17.  *coeffs are mean graduation rate for men by year of birth in the 1970 census;
+. forv i = 1 / `max_time4' {;
+ 18.         qui replace pergrad = _b[`i'.time4] if time4 == `i' & sex == 1;
+ 19.         *assigns mean graduation rate for the part of the `i'th time4 cohort that is
+>         *men to each of the male observations in that cohort;
+. };
+ 20. qui reg hsgrad ibn.time4 if year == 1970 & sex == 2, noconstant;
+ 21.  *coeffs are mean graduation rate for women by year of birth in the 1970 census;
+. forv i = 1 / `max_time4' {;
+ 22.         qui replace pergradb = _b[`i'.time4] if time4 == `i' & sex == 2;
+ 23.         *assigns mean graduation rate for the part of the `i'th time4 cohort that is
+>         *women to each of the female observations in that cohort;
+. };
+ 24. *graphing of regression coefficients;
+. set graphics off;
+ 25.         *disables gr from popping up;
+. scatter pergrad pergradb time4 if f_time4 == 1, 
+>         sort(sex) legend() scheme(s1color) mcolor(black) 
+>         ytitle("Percent Graduating") 
+>         xtitle("Year of Birth") 
+>         msymbol(O D)
+>         xlabel( 1 "1912" 2 " " 3 "1914" 4 " " 5 "1916" 6 " " 7 "1918" 8 " " 9 "1920"
+>                         10 " " 11 "1922") 
+>         xline(8, lcolor(black) lwidth(thin) lpattern(dash)) 
+>         note(Fig. 4. — 1970 high school graduation: by year of birth);
+ 26.                                 *scatter plots mean graduation rate for each time41 cohort (year of birth and 
+> *sex cohorts) by year of birth;
+. qui gr  save Figure4, replace;
+ 27.                         *saves scatter plot as a gph;
+. qui gr  export Figure4.pdf, replace;
+ 28.         *saves scatter plot as a pdf;
+. restore;
+ 29. end;
+
+. figure_4;
+
+. capture program drop figure_5;
+
+. program define figure_5;
+  1. /*
+> Figure 5: a) 1980 high school graduation rate by quarter of birth. b) Regression
+> -adjusted 1980 high school graduation rate by quarter of birth replication.
+> */
+> 
+> preserve;
+  2. *observation limitations for regression;
+. qui keep if (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .) & yob >= 1916 & 
+>         yob <= 1920 & sex == 1;
+  3. *keeps male observations that do not have allocated ages and are born 1916-1920;
+. *regression variable creation;
+. qui egen yobqtrc                = group(yob birthqtr);
+  4.                 la var   yobqtrc                "birth quarter by year of birth cohorts";
+  5. qui bys  yobqtrc:               gen f_yobqtrc = (_n == 1);
+  6. la var   f_yobqtrc              "first observation in time5 cohorts";
+  7. qui su   yobqtrc;
+  8. local    max_yobqtrc    = r(max);
+  9.         *counts number of years of birth;
+. qui gen  pergrad5a              = .;
+ 10. la var   pergrad5a              "high school graduation rate of each birth quarter";
+ 11. replace  hsgrad                 = hsgrad * 100;
+ 12. *replaced to be in percentage points;
+. *regression and coefficient output;
+. qui reg hsgrad ibn.yobqtrc if year == 1980, noconstant;
+ 13.  *coefficients are mean high school graduation rate by birth quarter and year of;
+. *birth as reported in the 1980 census;
+. forv i = 1 / `max_yobqtrc' {;
+ 14.         qui replace pergrad5a = _b[`i'.yobqtrc] if yobqtrc == `i';
+ 15.         *assigns mean graduation rate for the part of the `i'th time5 cohort to;
+.         *each of the in that cohort;
+.         };
+ 16. *graphing of regression coefficients;
+. scatter pergrad5a yobqtrc if f_yobqtrc == 1, 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Percent Graduating") xtitle("Quarter of Birth")
+>         xlabel( 1 "1916 Q1" 2 " " 3 " " 4 " " 5 "1917 Q1" 6 " " 7 " " 8 " " 9 
+>                 "1918 Q1" 10 " " 11 " " 12 " " 13 "1919 Q1" 14 " " 15 " " 16 " " 17 
+>                 "1920 Q1" 18 " " 19 " " 20 " ") 
+>         xline(13, lcolor(black) lwidth(thin) lpattern(dash))
+>         note(Fig. 5a - 1980 high school graduation rate by quarter of birth);
+ 17.         *scatter plots mean graduation rate for each time5 cohort (year of birth and 
+> *birth quarter cohorts) by their birth quarter and year of birth;
+. qui gr  save Figure5a, replace;
+ 18.                         *saves scatter plot as a gph;
+. qui gr  export Figure5a.pdf, replace;
+ 19.         *saves scatter plot as a pdf;
+. *regression variable creation;
+. qui gen pergrad5b = .;
+ 20. la var pergrad5b "high school graduation rates of each birth quarter cohort 
+>         (regression adjusted)";
+ 21.                 *regression and coefficient output;
+. qui reg hsgrad c.yobqtrc ibn.birthqtr  if year == 1980, nocons;
+ 22. *regression of high school graduation rates from the 1980 census on the 
+> *continuous years and quarters of birth 1916-1920 and binary birth quarter;
+.  *variables;
+. predict rhsgrad, r;
+ 23. *extracts the residual of high school graduation rates - the change in high;
+.  *school graduation rates that is not explained by the linear trend of time nor;
+.  *seasonality of birth quarter;
+. qui reg rhsgrad ibn.yobqtrc if year == 1980, nocons;
+ 24. *regression of the residual of the high school graduation rate on the birth;
+.  forv i = 1 / `max_yobqtrc' {;
+ 25.         qui replace pergrad5b = _b[`i'.yobqtrc] if yobqtrc == `i';
+ 26.         *assigns mean graduation rate for the part of the `i'th time5 cohort to;
+.         *each of the in that cohort;
+.         };
+ 27. *graphing of regression coefficients;
+. set graphics off;
+ 28.         *disables graphics from popping up;
+. scatter pergrad5b yobqtrc if f_yobqtrc == 1, 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Percent Graduating") xtitle("Quarter of Birth")
+>         xlabel( 1 "1916 Q1" 2 " " 3 " " 4 " " 5 "1917 Q1" 6 " " 7 " " 8 " " 9 
+>                 "1918 Q1" 10 " " 11 " " 12 " " 13 "1919 Q1" 14 " " 15 " " 16 " " 17 
+>                 "1920 Q1" 18 " " 19 " " 20 " ") 
+>         xline(13, lcolor(black) lwidth(thin) lpattern(dash))
+>         note(Fig. 5b - Regression-adjusted 1980 high school graduation rate by 
+>                 quarter of birth);
+ 29.                                         *scatter plot of percent disabled by quarter of birth;
+. *reg take out trend and control seasonality ;
+. qui gr  save Figure5b, replace;
+ 30.                         *saves scatter plot as a gph;
+. qui gr  export Figure5b.pdf, replace;
+ 31.         *saves scatter plot as a pdf;
+. restore;
+ 32. end;
+
+. figure_5;
+(222,253 real changes made)
+note: label truncated to 80 characters
+
+. capture program drop figure_6;
+
+. program define figure_6;
+  1. *Figure 6: 1970 male disability rate: physical disability limits or prevents 
+> *work replication.;
+. preserve;
+  2. *observation limitations for regression;
+. qui keep if sex == 1 & (qage == 0 | qage == .) & (qage2 == 0 | qage2 ==.) & 
+>         yob >= 1912 & yob <= 1922;
+  3. *keeps male observations that do not have their age allocated born 1912-1922;
+. *variable creation for regression;
+. qui egen time6          = group(yob);
+  4.                 la var   time6          "male year of birth cohorts";
+  5. qui bys  time6:         gen f_time6 = (_n == 1);
+  6. la var   f_time6        "first observation of each time6 cohort";
+  7. qui su   time6;
+  8. local    max_time6      = r(max);
+  9.         *counts birth quarters;
+. qui gen  perdis         = .;
+ 10. la var   perdis         "percent of observations that have a disability that affects
+>                                         their work";
+ 11. qui replace idisaffwrk = idisaffwrk * 100;
+ 12. *scales it as percentage points;
+.                                                 *regression and coefficient output;
+. qui reg idisaffwrk ibn.time6 if year == 1970, noconstant;
+ 13.  *coefficients are the time6 cohort's proportion disabled in the 1970 census;
+. forv i = 1 / `max_time6' {;
+ 14.         qui replace perdis = _b[`i'.time6] if time6 == `i';
+ 15.         *assigns the cohort's proportion disabled to perdis for that cohort;
+. };
+ 16. *graphing regression coefficients;
+. set graphics off;
+ 17.         *disables graph from popping up;
+. scatter perdis time6 if f_time6 ==1, 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Percent with a Disability") 
+>         xtitle("Year of Birth")
+>         xlabel( 1 "1912" 2 " " 3 "1914" 4 " " 5 "1916" 6 " " 7 "1918" 8 " " 9 "1920"
+>                         10 " " 11 "1922")
+>         xline(8, lcolor(black) lwidth(thin) lpattern(dash)) 
+>         note(Fig. 6. — 1970 male disability rate: physical disability limits or 
+>                  prevents work);
+ 18.                                         *scatter plot of percent disabled by year of birth;
+. qui gr  save Figure6, replace;
+ 19.                         *saves scatter plot as a gph;
+. qui gr  export Figure6.pdf, replace;
+ 20.         *saves scatter plot as a pdf;
+. restore;
+ 21. end;
+
+. figure_6;
+note: label truncated to 80 characters
+
+. capture program drop figure_8;
+
+. program define figure_8;
+  1. *Figure 8: Average welfare payments for women and nonwhites: by year of birth
+> *replication.;
+. preserve;
+  2. *observation limitation for regression;
+. keep if (qage == 0 | qage == .) & (qage2 == 0 | qage2 == .);
+  3. *keeps observations with unallocated ages;
+. *variable creation for regressions;
+. *replace incwelfr_adj           = 0 if incwelfr_adj == .;
+. qui egen        yobc                    = group(yob);
+  4. la var          yobc                    "year of birth cohorts";
+  5. qui egen        yobsexc                 = group(yob sex);
+  6. *year of birth and sex cohorts;
+. la var          yobsexc                 "year of birth and sex cohorts";
+  7. gen             nonwhite                = race != 1;
+  8. la var          nonwhite                "non-white race";
+  9. qui egen        yobracec                = group(yob nonwhite);
+ 10. la var          yobracec                "year of birth and white/nonwhite cohorts";
+ 11. qui egen        yobracesexc             = group(yob nonwhite sex);
+ 12. la var          yobracesexc             "year of birth, sex, and white/nonwhite cohorts";
+ 13. qui bys         yobracesexc:    gen f_nonwhiteman = (_n == 1) if nonwhite & sex == 1;
+ 14. la var          f_nonwhiteman   "first observation from each cohort of nonwhite men 
+>                                                         out of all cohorts of observations grouped by year 
+>                                                         of birth, sex, and race";
+ 15. qui bys         yobracesexc:    gen f_whitewomn = (_n == 1) if (!nonwhite) & 
+>                                                         sex == 2;
+ 16. la var          f_whitewomn             "first observation from each cohort of white women 
+>                                                         out of all cohorts of observations grouped by year 
+>                                                         of birth, sex, and race";
+ 17. qui su          yobsexc;
+ 18. local           max_yobsexc     = r(max);
+ 19.         *number of year of birth, sex cohorts;
+. *calculations for mean welfare for women and non-white people;
+. qui gen         meanwelfsex     = .;
+ 20. la var          meanwelfsex             "Payments to Women";
+ 21. qui su          yobracec;
+ 22. local           max_yobracec    = r(max);
+ 23.         *number of year of birth, race cohorts;
+. qui gen         meanwelfrace    = .;
+ 24. la var          meanwelfrace    "Payements to Non-White Persons";
+ 25. *calculations for percent of women and nonwhite people receiving welfare;
+. qui gen         perwelfsex              = .;
+ 26. la var          perwelfsex              "Payments to Women";
+ 27. replace         irecwelf                = irecwelf *100 ;
+ 28. *scales indicator variable for if someone receives welfare to out of 100;
+. qui gen         perwelfrace     = .;
+ 29. la var          perwelfrace     "Payments to Non-White Persons";
+ 30. *regression and coefficient output;
+. qui reg incwelfr_adj ibn.yobsexc, noconstant;
+ 31.  *coefficients are mean welfare by year of birth and sex;
+. forv i = 1 / `max_yobsexc' {;
+ 32.         qui replace meanwelfsex = _b[`i'.yobsexc] if yobsexc == `i' & sex == 2;
+ 33.         *assigns coefficients to mean welfare variable for women;
+.         *(if assigned to both women and men, all cohorts would be graphed);
+. };
+ 34. qui reg incwelfr_adj ibn.yobracec, noconstant;
+ 35.  *coefficients are mean welfare by year of birth and race;
+. forv i = 1 / `max_yobracec' {;
+ 36.         qui replace meanwelfrace = _b[`i'.yobracec] if yobracec == `i' & nonwhite;
+ 37.         *assigns coefficients to mean welfare variable for nonwhite people
+>         *(if assigned to both nonwhite and white, all cohorts would be graphed);
+.         };
+ 38. qui reg irecwelf ibn.yobsexc, noconstant;
+ 39.  *coefficients are percent of cohort receiving welfare by year of birth and sex;
+. forv i = 1 / `max_yobsexc' {;
+ 40.         qui replace perwelfsex = _b[`i'.yobsexc] if yobsexc == `i' & sex == 2;
+ 41.         *assigns coefficients to the percent of cohort that receives welfare 
+>         *variable for women cohorts. 
+>         *(if assigned to both women and men, all cohorts would be graphed);
+. };
+ 42. qui reg irecwelf ibn.yobracec, noconstant;
+ 43.  *coefficients are percent of cohort receiving welfare by year of birth and race;
+. forv i = 1 / `max_yobracec' {;
+ 44.         qui replace perwelfrace = _b[`i'.yobracec] if yobracec == `i' & nonwhite;
+ 45.         *assigns coefficients to the percent of cohort that receives welfare 
+>         *variable for nonwhite cohorts;
+.         *(if assigned to both nonwhite and white, all cohorts would be graphed);
+. };
+ 46. *graphing of coefficients;
+. scatter meanwelfsex meanwelfrace yobc if (f_whitewomn == 1 | 
+>         f_nonwhiteman == 1), 
+>         scheme(s1color) mcolor(black)
+>         ytitle("Mean Welfare Payement (2005 Dollars)") 
+>         xtitle("Year of Birth")
+>         xlabel( 1 "1911" 2 " " 3 "1913" 4 " " 5 "1915" 6 " " 7 "1917" 8 " " 9 "1919"
+>                         10 " " 11 "1921" 12 " " 13 "1923" 14 " ")
+>         xline(9, lcolor(black) lwidth(thin) lpattern(dash)) 
+>         note(Fig. 8a. - Average welfare payments for women and non-white persons: by 
+>                 year of birth);
+ 47.                         *scatter plot of mean welfare for women and nonwhite people by year of birth;
+. qui gr  save Figure8a, replace;
+ 48.                         *saves scatter plot as a gph;
+. qui gr  export Figure8a.pdf, replace;
+ 49.         *saves scatter plot as a pdf;
+. scatter perwelfsex perwelfrace yobc if (f_whitewomn == 1 | f_nonwhiteman == 1),
+>         scheme(s1color) mcolor(black)
+>         ytitle("Percent Receiving Welfare") 
+>         xtitle("Year of Birth")
+>         xlabel( 1 "1911" 2 " " 3 "1913" 4 " " 5 "1915" 6 " " 7 "1917" 8 " " 9 "1919"
+>                         10 " " 11 "1921" 12 " " 13 "1923" 14 " ")
+>         xline(9, lcolor(black) lwidth(thin) lpattern(dash)) 
+>         note(Fig. 8b. - Percent of women and non-white persons who receive welfare 
+>                 payments: by year of birth);
+ 50. *scatter plot of percent of women and non-white people who receive welfare by 
+> *year of birth;
+. qui gr  save Figure8b, replace;
+ 51.                         *saves scatter plot as a gph;
+. qui gr  export Figure8b.pdf, replace;
+ 52.         *saves scatter plot as a pdf;
+. restore;
+ 53. end;
+
+. figure_8;
+(72,441 observations deleted)
+note: label truncated to 80 characters
+note: label truncated to 80 characters
+(82,542 real changes made)
+
+. 
+end of do-file
+
