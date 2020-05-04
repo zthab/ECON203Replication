@@ -1,6 +1,7 @@
 
 
-
+Download census data through IPUMS USA: https://usa.ipums.org/usa/index.shtml
+Reference codebook for sample selection.
 
 Each figure and table can be constructed in its namesake program. rep_clean_vars must be run before any other program is run; it only has to be run once. 
 Any data cleaning or limitations that only apply to part of the following analysis will be conducted in those specific programs. All figure and table programs are built to be independent of one another, and thus can be run in any combination. 
@@ -67,13 +68,13 @@ per the paper's own instructions, I estimated the cohort trend for all income re
 	     1980 income variables
 	  Variable   |  Thabet  | Almond
 	  ------------------------------
-Mean	  totinc_adj |-600.096  |􏰁-1,065
+Mean	  totinc_adj |-600.096  |-1,065
 SD		     |(174.147) |[191]
 P-Value		     |0.001     |<0.01
-Mean	  incss_adj  |-301.301  |􏰁83
+Mean	  incss_adj  |-301.301  |83
 SD		     |(17.720)  |[19]
 P-Value		     |<0.001    |<0.01
-Mean	  incwelf_adj|7.405     |􏰁17
+Mean	  incwelf_adj|7.405     |17
 SD		     |(6.764)   |[7]
 P-Value		     |0.274     |<0.05
 	
@@ -148,3 +149,5 @@ Citations
 Almond, Douglas. “Is the 1918 Influenza Pandemic Over? Long‐Term Effects of In Utero Influenza Exposure in the Post‐1940 U.S. Population.” Journal of Political Economy, vol. 114, no. 4, Aug. 2006, pp. 672–712. DOI.org (Crossref), doi:10.1086/507154.
 
 Organization for Economic Co-operation and Development, Consumer Price Index: Total All Items for the United States [CPALTT01USA657N], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CPALTT01USA657N, April 30, 2020.
+
+Steven Ruggles, Sarah Flood, Ronald Goeken, Josiah Grover, Erin Meyer, Jose Pacas and Matthew Sobek. IPUMS USA: Version 10.0 [dataset]. Minneapolis, MN: IPUMS, 2020. https://doi.org/10.18128/D010.V10.0 
